@@ -1,5 +1,0 @@
-ray[rllib]==2.7.0
-gym==0.26.5
-numpy
-matplotlib
-torch
