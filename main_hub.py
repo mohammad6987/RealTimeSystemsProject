@@ -42,7 +42,8 @@ def main() -> None:
     if args.phase == "phase1":
         cmd = [
             sys.executable,
-            "phase1/train_phase1_mappo.py",
+            "-m",
+            "phase1.train_phase1_mappo",
             "--n-values",
             *[str(v) for v in args.n_values],
             "--iterations",
@@ -55,7 +56,8 @@ def main() -> None:
     else:
         cmd = [
             sys.executable,
-            "phase2/train_phase2_hierarchical_mappo.py",
+            "-m",
+            "phase2.train_phase2_hierarchical_mappo",
             "--cluster-values",
             *[str(v) for v in args.cluster_values],
             "--iterations",
