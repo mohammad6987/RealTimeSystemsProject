@@ -55,7 +55,7 @@ def build_algo(env_cfg: Dict[str, Any]):
         # Single local runner is enough for this project-scale setup.
         .env_runners(num_env_runners=0, rollout_fragment_length=env_cfg["max_steps"])
         .training(
-            lr=5e-4,
+            lr=3e-4,
             train_batch_size=4000,
             model={"fcnet_hiddens": [256, 256], "fcnet_activation": "relu"},
         )

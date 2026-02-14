@@ -3,7 +3,7 @@
 Hierarchical reinforcement-learning implementation for mobile edge computing (MEC), covering:
 
 - **Phase 1**: flat multi-agent control (UE agents + one server scheduler).
-- **Phase 2**: hierarchical control (global coordinator + per-cluster controllers).
+- **Phase 2**: hierarchical control (global coordinator + UE agents + per-cluster schedulers).
 
 This project uses **Ray RLlib** with **TorchModelV2 custom models** (shared policy per role).
 
@@ -144,7 +144,8 @@ Per `N` in `plots/phase1/N_<N>/`:
 
 Implement hierarchical resource allocation with total users fixed at 100:
 - coordinator allocates server compute shares to clusters,
-- cluster controllers manage offloading and local scheduling priorities.
+- each UE decides whether to offload (like phase 1),
+- one scheduler per cluster orders offloaded requests in that cluster.
 
 Target cluster counts:
 - `K ∈ {4,5,6,7,8,9,10}`
@@ -153,10 +154,12 @@ Target cluster counts:
 
 - Agents:
   - `coordinator`
-  - `cluster_0 ... cluster_{K-1}`
+  - `ue_0 ... ue_99`
+  - `cluster_sched_0 ... cluster_sched_{K-1}`
 - Policies:
   - `coordinator_policy` (single global)
-  - `cluster_policy` (shared across clusters)
+  - `ue_policy` (shared across all UEs)
+  - `cluster_sched_policy` (shared across cluster schedulers)
 - Reward:
   - cooperative shared reward with QoS-energy tradeoff
 
@@ -175,19 +178,25 @@ Target cluster counts:
 - Coordinator action (`shape=(K,)`): cluster allocation logits
   - converted to normalized cluster CPU shares `phi_k`
 
-- Cluster observation (`shape=(M*6,)`): padded local user table (`M=max_users_per_cluster`)
-  - per row: `[valid, data_norm, cycles_norm, deadline_norm, dist_norm, f_loc_norm]`
-- Cluster action (`shape=(3*M,)`):
-  - `[offload_logits, bandwidth_logits, priority_logits]`
+- UE observation (`shape=(5,)`):
+  - `[data_mbit, cycles_g, deadline_s, dist_m, f_loc_ghz]`
+- UE action (`shape=(2,)`):
+  - `[offload_logit, bandwidth_request_logit]`
+
+- Cluster scheduler observation (`shape=(M*7,)`, padded local user table):
+  - per row: `[valid, data_norm, cycles_norm, deadline_norm, dist_norm, req_off, req_bw_logit]`
+- Cluster scheduler action (`shape=(M,)`):
+  - priority logits for users in that cluster
 
 ### Environment Dynamics (per slot)
 
 1. Coordinator allocates server compute share per cluster.
-2. Each cluster controller decides offloading, bandwidth requests, and priorities for local users.
+2. Each UE decides offloading and bandwidth request logits.
 3. Global spectrum is distributed across all offloaded users.
-4. Per-cluster scheduling is applied with cluster-specific effective CPU.
-5. QoS and energy are computed globally and per cluster.
-6. Shared reward is emitted to all agents.
+4. Each cluster scheduler orders offloaded requests from its own cluster.
+5. Per-cluster execution runs under coordinator-assigned CPU share.
+6. QoS and energy are computed globally and per cluster.
+7. Shared reward is emitted to all agents.
 
 ### Phase-2 Default Parameters (`phase2/phase2_config.py`)
 
@@ -213,10 +222,12 @@ Target cluster counts:
 
 - `phase2/phase2_coordinator_network.py`
   - `CoordinatorNetwork(TorchModelV2, nn.Module)`
-- `phase2/phase2_cluster_network.py`
-  - `ClusterControllerNetwork(TorchModelV2, nn.Module)`
+- `phase1/ue_policy_network.py` (reused in phase 2 for UE decisions)
+  - `UEPolicyNetwork(TorchModelV2, nn.Module)`
+- `phase1/server_scheduler_network.py` (reused in phase 2 for cluster schedulers)
+  - `ServerSchedulerNetwork(TorchModelV2, nn.Module)`
 
-Both use RLlib FC actor-critic backbone.
+All use RLlib FC actor-critic backbones.
 
 ### Trainer
 

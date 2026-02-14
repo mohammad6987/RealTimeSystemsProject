@@ -18,7 +18,8 @@ except Exception:
 from phase2.phase2_config import Phase2Config
 from phase2.phase2_env import MECPhase2HierarchicalEnv
 import phase2.phase2_coordinator_network  # noqa: F401
-import phase2.phase2_cluster_network  # noqa: F401
+import phase1.ue_policy_network  # noqa: F401
+import phase1.server_scheduler_network  # noqa: F401
 
 
 def parse_args() -> argparse.Namespace:
@@ -50,7 +51,7 @@ def moving_average(x: List[float], w: int = 5) -> np.ndarray:
 
 
 def build_algo(env_cfg: Dict[str, Any]):
-    """Construct one RLlib algorithm with coordinator+cluster policies."""
+    """Construct one RLlib algorithm with UE + per-cluster scheduler + global coordinator policies."""
     config = (
         AlgoConfig()
         .environment(env="mec_phase2_env", env_config=env_cfg)
@@ -65,9 +66,14 @@ def build_algo(env_cfg: Dict[str, Any]):
         .multi_agent(
             policies={
                 "coordinator_policy": (None, None, None, {"model": {"custom_model": "coordinator_network"}}),
-                "cluster_policy": (None, None, None, {"model": {"custom_model": "cluster_controller_network"}}),
+                "ue_policy": (None, None, None, {"model": {"custom_model": "ue_policy_network"}}),
+                "cluster_sched_policy": (None, None, None, {"model": {"custom_model": "server_scheduler_network"}}),
             },
-            policy_mapping_fn=lambda aid, *args, **kwargs: "coordinator_policy" if aid == "coordinator" else "cluster_policy",
+            policy_mapping_fn=lambda aid, *args, **kwargs: (
+                "coordinator_policy"
+                if aid == "coordinator"
+                else ("ue_policy" if aid.startswith("ue_") else "cluster_sched_policy")
+            ),
         )
     )
     return config.build_algo()
@@ -82,7 +88,13 @@ def evaluate_episode(algo, env_cfg: Dict[str, Any], eval_seed: int) -> Dict[str,
     while not done:
         actions = {}
         for aid, agent_obs in obs.items():
-            policy_id = "coordinator_policy" if aid == "coordinator" else "cluster_policy"
+            if aid == "coordinator":
+                policy_id = "coordinator_policy"
+            elif aid.startswith("ue_"):
+                policy_id = "ue_policy"
+            else:
+                policy_id = "cluster_sched_policy"
+
             action = algo.compute_single_action(agent_obs, policy_id=policy_id, explore=False)
             if isinstance(action, tuple):
                 action = action[0]
@@ -157,7 +169,6 @@ def plot_per_cluster(curves: List[List[float]], title: str, y_label: str, out_pa
 
 def plot_schedule_view(schedule_logs: List[Dict[str, Any]], out_path: str) -> None:
     """Show a compact Gantt view for offloaded tasks in first non-empty slots."""
-    # Flatten cluster-level schedules into panel entries.
     panels: List[Dict[str, Any]] = []
     for s in schedule_logs:
         slot = int(s["slot"])
@@ -213,7 +224,6 @@ def run_for_k(k: int, args: argparse.Namespace) -> None:
             n_clusters=k,
             max_steps=args.max_steps,
             seed=100 + k,
-            # Capacity guard to fit worst-case cluster size for this K.
             max_users_per_cluster=int(np.ceil(args.n_users / k)),
         )
     )
@@ -232,8 +242,6 @@ def run_for_k(k: int, args: argparse.Namespace) -> None:
 
     for it in range(1, args.iterations + 1):
         algo.train()
-
-        # Mean over several eval episodes gives much cleaner learning curves.
         stats = evaluate_mean(algo, env_cfg, base_seed=10000 + k * 100 + it, n_episodes=5)
 
         total_qos_curve.append(stats["sum_qos_episode"])
@@ -245,7 +253,6 @@ def run_for_k(k: int, args: argparse.Namespace) -> None:
 
         final_schedule = stats["schedule"]
 
-        # Keep best model according to weighted objective.
         score = stats["sum_qos_episode"] - 1e-3 * stats["sum_energy_episode"]
         if score > best_score:
             best_score = score

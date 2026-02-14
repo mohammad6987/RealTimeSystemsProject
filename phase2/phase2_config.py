@@ -10,7 +10,8 @@ class Phase2Config:
 
     Hierarchy:
     - One coordinator agent allocates server CPU shares to clusters.
-    - One cluster agent per cluster controls offloading and intra-cluster priorities.
+    - One UE agent per user decides offloading and bandwidth request.
+    - One cluster scheduler per cluster handles intra-cluster priority order.
     """
 
     # Fixed by project statement for phase 2.
