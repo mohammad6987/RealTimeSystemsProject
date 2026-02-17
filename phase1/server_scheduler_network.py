@@ -16,11 +16,9 @@ class ServerSchedulerNetwork(TorchModelV2, nn.Module):
     """
 
     def __init__(self, obs_space, action_space, num_outputs, model_config, name):
-        # Initialize RLlib and PyTorch base classes.
         TorchModelV2.__init__(self, obs_space, action_space, num_outputs, model_config, name)
         nn.Module.__init__(self)
 
-        # Shared actor-critic FC network from RLlib utilities.
         self.backbone = FullyConnectedNetwork(obs_space, action_space, num_outputs, model_config, f"{name}_backbone")
         self._value_out = None
 
@@ -37,5 +35,4 @@ class ServerSchedulerNetwork(TorchModelV2, nn.Module):
         return self._value_out
 
 
-# Register model under a stable name used in trainer config.
 ModelCatalog.register_custom_model("server_scheduler_network", ServerSchedulerNetwork)

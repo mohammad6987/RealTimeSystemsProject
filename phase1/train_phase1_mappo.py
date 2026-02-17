@@ -50,13 +50,12 @@ def build_algo(env_cfg: Dict[str, Any]):
         AlgoConfig()
         .environment(env="mec_phase1_env", env_config=env_cfg)
         .framework("torch")
-        # Keep old API stack enabled for custom TorchModelV2 models.
+        .resources(num_gpus=1)
         .api_stack(enable_rl_module_and_learner=False, enable_env_runner_and_connector_v2=False)
-        # Single local runner is enough for this project-scale setup.
-        .env_runners(num_env_runners=0, rollout_fragment_length=env_cfg["max_steps"])
+        .env_runners(num_env_runners=4, rollout_fragment_length=env_cfg["max_steps"])
         .training(
             lr=3e-4,
-            train_batch_size=4000,
+            train_batch_size=8000,
             model={"fcnet_hiddens": [256, 256], "fcnet_activation": "relu"},
         )
         .multi_agent(
@@ -280,7 +279,6 @@ def run_for_n(n_ue: int, iterations: int, max_steps: int, out_dir: str, base_see
 
 
 def main() -> None:
-    """Entry point: run experiment sweep over requested UE counts."""
     args = parse_args()
     ensure_dir(args.out_dir)
 

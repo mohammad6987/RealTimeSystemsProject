@@ -17,13 +17,12 @@ except Exception:
 
 from phase2.phase2_config import Phase2Config
 from phase2.phase2_env import MECPhase2HierarchicalEnv
-import phase2.phase2_coordinator_network  # noqa: F401
-import phase1.ue_policy_network  # noqa: F401
-import phase1.server_scheduler_network  # noqa: F401
+import phase2.phase2_coordinator_network  
+import phase1.ue_policy_network  
+import phase1.server_scheduler_network  
 
 
 def parse_args() -> argparse.Namespace:
-    """CLI for running phase-2 cluster sweep experiments."""
     p = argparse.ArgumentParser(description="Train phase-2 hierarchical MAPPO for K in {4..10}, N=100")
     p.add_argument("--cluster-values", nargs="+", type=int, default=[4, 5, 6, 7, 8, 9, 10])
     p.add_argument("--iterations", type=int, default=120)
