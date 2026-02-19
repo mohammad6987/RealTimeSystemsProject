@@ -3,3 +3,4 @@ numpy
 matplotlib
 torch
 gymnasium
+stable-baselines3[extra]

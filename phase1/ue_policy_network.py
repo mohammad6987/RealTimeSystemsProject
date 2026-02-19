@@ -42,3 +42,22 @@ class UEPolicyNetwork(TorchModelV2, nn.Module):
 
 # Register model name so policy configs can reference it via `custom_model`.
 ModelCatalog.register_custom_model("ue_policy_network", UEPolicyNetwork)
+
+
+try:
+    from stable_baselines3.common.policies import ActorCriticPolicy
+
+    class UEPolicySB3(ActorCriticPolicy):
+        """
+        Stable-Baselines3 PPO policy matching the UE network layout.
+
+        Uses a shared MLP for actor and critic with [256, 256] hidden units.
+        """
+
+        def __init__(self, *args, **kwargs):
+            kwargs.setdefault("net_arch", [256, 256])
+            kwargs.setdefault("activation_fn", nn.ReLU)
+            super().__init__(*args, **kwargs)
+
+except Exception:  # pragma: no cover - optional SB3 dependency
+    UEPolicySB3 = None

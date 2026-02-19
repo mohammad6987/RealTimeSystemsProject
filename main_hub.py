@@ -29,6 +29,8 @@ def main() -> None:
     p1.add_argument("--iterations", type=int, default=120)
     p1.add_argument("--max-steps", type=int, default=200)
     p1.add_argument("--out-dir", type=str, default="plots/phase1")
+    p1.add_argument("--backend", choices=["rllib", "sb3"], default="rllib")
+    p1.add_argument("--seed", type=int, default=42)
 
     p2 = sub.add_parser("phase2", help="Run phase-2 hierarchical training")
     p2.add_argument("--cluster-values", nargs="+", type=int, default=[4, 5, 6, 7, 8, 9, 10])
@@ -36,14 +38,17 @@ def main() -> None:
     p2.add_argument("--max-steps", type=int, default=200)
     p2.add_argument("--n-users", type=int, default=100)
     p2.add_argument("--out-dir", type=str, default="plots/phase2")
+    p2.add_argument("--backend", choices=["rllib", "sb3"], default="rllib")
+    p2.add_argument("--seed", type=int, default=42)
 
     args = parser.parse_args()
 
     if args.phase == "phase1":
+        module = "phase1.train_phase1_mappo" if args.backend == "rllib" else "phase1.train_phase1_mappo_sb3"
         cmd = [
             sys.executable,
             "-m",
-            "phase1.train_phase1_mappo",
+            module,
             "--n-values",
             *[str(v) for v in args.n_values],
             "--iterations",
@@ -53,11 +58,18 @@ def main() -> None:
             "--out-dir",
             args.out_dir,
         ]
+        if args.backend == "sb3":
+            cmd += ["--seed", str(args.seed)]
     else:
+        module = (
+            "phase2.train_phase2_hierarchical_mappo"
+            if args.backend == "rllib"
+            else "phase2.train_phase2_hierarchical_mappo_sb3"
+        )
         cmd = [
             sys.executable,
             "-m",
-            "phase2.train_phase2_hierarchical_mappo",
+            module,
             "--cluster-values",
             *[str(v) for v in args.cluster_values],
             "--iterations",
@@ -69,6 +81,8 @@ def main() -> None:
             "--out-dir",
             args.out_dir,
         ]
+        if args.backend == "sb3":
+            cmd += ["--seed", str(args.seed)]
 
     code = run_command(cmd)
     raise SystemExit(code)

@@ -39,6 +39,15 @@ source venv/bin/activate
 pip install -r reqs.txt
 ```
 
+### SB3 Backend (Optional)
+
+This repo now supports **Stable-Baselines3 PPO** in addition to RLlib MAPPO.
+Install the extra dependency via `reqs.txt` (see updated list) or:
+
+```bash
+pip install stable-baselines3
+```
+
 ## Main Hub (Recommended)
 
 Use one command entry-point for both phases.
@@ -49,10 +58,32 @@ Use one command entry-point for both phases.
 python main_hub.py phase1 --n-values 2 3 4 5 6 7 --iterations 120 --max-steps 200
 ```
 
+- Phase 1 (SB3 PPO backend):
+
+```bash
+python main_hub.py phase1 --backend sb3 --n-values 2 3 4 5 6 7 --iterations 120 --max-steps 200
+```
+
+Reproducible SB3 runs (fixed seed):
+
+```bash
+python main_hub.py phase1 --backend sb3 --seed 123 --n-values 2 3 --iterations 120 --max-steps 200
+```
+
 - Phase 2:
 
 ```bash
 python main_hub.py phase2 --cluster-values 4 5 6 7 8 9 10 --n-users 100 --iterations 120 --max-steps 200
+```
+
+- Phase 2 (SB3 PPO backend):
+
+```bash
+python main_hub.py phase2 --backend sb3 --cluster-values 4 5 6 7 8 9 10 --n-users 100 --iterations 120 --max-steps 200
+```
+
+```bash
+python main_hub.py phase2 --backend sb3 --seed 123 --cluster-values 4 5 --n-users 100 --iterations 120 --max-steps 200
 ```
 
 ## Phase 1
@@ -254,6 +285,13 @@ If needed, bypass hub:
 ```bash
 python -m phase1.train_phase1_mappo
 python -m phase2.train_phase2_hierarchical_mappo
+```
+
+SB3 PPO variants:
+
+```bash
+python -m phase1.train_phase1_mappo_sb3
+python -m phase2.train_phase2_hierarchical_mappo_sb3
 ```
 
 ## Practical Notes
