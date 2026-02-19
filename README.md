@@ -294,6 +294,10 @@ python -m phase1.train_phase1_mappo_sb3
 python -m phase2.train_phase2_hierarchical_mappo_sb3
 ```
 
+Phase-1 SB3 now trains two models:
+- `sb3_ppo_ue_model` for the shared UE policy
+- `sb3_ppo_server_model` for the server scheduler policy
+
 ## Practical Notes
 
 - RLlib may print deprecation warnings (`compute_single_action`, logger warnings).

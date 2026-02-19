@@ -13,7 +13,8 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 
 from phase1.mec_phase1_config import Phase1Config
-from phase1.sb3_phase1_env import SB3Phase1JointEnv
+from phase1.sb3_phase1_env import SB3Phase1ServerEnv, SB3Phase1UEEnv
+from phase1.server_scheduler_network import ServerPolicySB3
 from phase1.ue_policy_network import UEPolicySB3
 
 
@@ -107,22 +108,29 @@ def plot_schedule(scheduling_logs: List[Dict[str, Any]], n_ue: int, path: str) -
     plt.close(fig)
 
 
-def evaluate_episode(model: PPO, env_cfg: Dict[str, Any], eval_seed: int) -> Dict[str, Any]:
-    eval_env = SB3Phase1JointEnv({**env_cfg, "seed": eval_seed})
-    obs, _ = eval_env.reset()
+def evaluate_episode(ue_model: PPO, server_model: PPO, env_cfg: Dict[str, Any], eval_seed: int) -> Dict[str, Any]:
+    env = SB3Phase1UEEnv({**env_cfg, "seed": eval_seed})
+    obs, _ = env.reset()
 
     done = False
     while not done:
-        action, _ = model.predict(obs, deterministic=True)
-        obs, _, terminated, truncated, _ = eval_env.step(action)
-        done = bool(terminated or truncated)
+        ue_action, _ = ue_model.predict(obs, deterministic=True)
+        server_obs = env.env._server_obs()
+        server_action, _ = server_model.predict(server_obs, deterministic=True)
+
+        actions = env._split_ue_action(ue_action)
+        actions["server"] = np.asarray(server_action, dtype=np.float32)
+
+        obs, _, terminated, truncated, _ = env.env.step(actions)
+        obs = env._flatten_ue_obs(obs)
+        done = bool(terminated["__all__"] or truncated["__all__"])
 
     return {
-        "sum_qos_episode": float(np.sum(eval_env.logs["sum_qos"])),
-        "sum_energy_episode": float(np.sum(eval_env.logs["sum_energy"])),
-        "per_ue_qos_episode": [float(np.sum(x)) for x in eval_env.logs["per_ue_qos"]],
-        "per_ue_energy_episode": [float(np.sum(x)) for x in eval_env.logs["per_ue_energy"]],
-        "scheduling": eval_env.logs["scheduling"],
+        "sum_qos_episode": float(np.sum(env.logs["sum_qos"])),
+        "sum_energy_episode": float(np.sum(env.logs["sum_energy"])),
+        "per_ue_qos_episode": [float(np.sum(x)) for x in env.logs["per_ue_qos"]],
+        "per_ue_energy_episode": [float(np.sum(x)) for x in env.logs["per_ue_energy"]],
+        "scheduling": env.logs["scheduling"],
     }
 
 
@@ -148,20 +156,27 @@ def run_for_n(
         )
     )
 
-    def make_env():
-        return SB3Phase1JointEnv(env_cfg)
+    ue_model: PPO | None = None
+    server_model: PPO | None = None
 
-    vec_env = DummyVecEnv([make_env])
+    def make_ue_env():
+        return SB3Phase1UEEnv(env_cfg, server_policy_getter=lambda: server_model)
 
-    if UEPolicySB3 is None:
+    def make_server_env():
+        return SB3Phase1ServerEnv(env_cfg, ue_policy_getter=lambda: ue_model)
+
+    ue_env = DummyVecEnv([make_ue_env])
+    server_env = DummyVecEnv([make_server_env])
+
+    if UEPolicySB3 is None or ServerPolicySB3 is None:
         raise RuntimeError("Stable-Baselines3 is required for SB3 training. Install via `pip install stable-baselines3`.")
 
-    model = PPO(
+    ue_model = PPO(
         policy=UEPolicySB3,
-        env=vec_env,
-        learning_rate=3e-5,
-        batch_size=4096,
-        n_steps=256,
+        env=ue_env,
+        learning_rate=2e-7,
+        batch_size=512,
+        n_steps=4096,
         gamma=0.99,
         gae_lambda=0.95,
         clip_range=0.2,
@@ -173,6 +188,23 @@ def run_for_n(
         verbose=0,
     )
 
+    server_model = PPO(
+        policy=ServerPolicySB3,
+        env=server_env,
+        learning_rate=2e-7,
+        batch_size=512,
+        n_steps=4096,
+        gamma=0.99,
+        gae_lambda=0.95,
+        clip_range=0.2,
+        ent_coef=0.0,
+        vf_coef=0.5,
+        max_grad_norm=0.5,
+        policy_kwargs={"activation_fn": nn.ReLU, "net_arch": [256, 256]},
+        seed=base_seed + 999,
+        verbose=0,
+    )
+
     sum_qos_curve: List[float] = []
     sum_energy_curve: List[float] = []
     per_ue_qos_curves: List[List[float]] = [[] for _ in range(n_ue)]
@@ -180,8 +212,9 @@ def run_for_n(
     final_schedule: List[Dict[str, Any]] = []
 
     for it in range(1, iterations + 1):
-        model.learn(total_timesteps=timesteps_per_iter, reset_num_timesteps=False)
-        stats = evaluate_episode(model, env_cfg, eval_seed=base_seed + 10000 + it)
+        ue_model.learn(total_timesteps=timesteps_per_iter, reset_num_timesteps=False)
+        server_model.learn(total_timesteps=timesteps_per_iter, reset_num_timesteps=False)
+        stats = evaluate_episode(ue_model, server_model, env_cfg, eval_seed=base_seed + 10000 + it)
 
         sum_qos_curve.append(stats["sum_qos_episode"])
         sum_energy_curve.append(stats["sum_energy_episode"])
@@ -222,7 +255,8 @@ def run_for_n(
     )
     plot_schedule(final_schedule, n_ue=n_ue, path=os.path.join(target_dir, "edge_schedule_view.png"))
 
-    model.save(os.path.join(target_dir, "sb3_ppo_model"))
+    ue_model.save(os.path.join(target_dir, "sb3_ppo_ue_model"))
+    server_model.save(os.path.join(target_dir, "sb3_ppo_server_model"))
 
 
 def main() -> None:

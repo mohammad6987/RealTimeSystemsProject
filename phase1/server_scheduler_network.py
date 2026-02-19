@@ -36,3 +36,18 @@ class ServerSchedulerNetwork(TorchModelV2, nn.Module):
 
 
 ModelCatalog.register_custom_model("server_scheduler_network", ServerSchedulerNetwork)
+
+
+try:
+    from stable_baselines3.common.policies import ActorCriticPolicy
+
+    class ServerPolicySB3(ActorCriticPolicy):
+        """Stable-Baselines3 PPO policy for the server scheduler."""
+
+        def __init__(self, *args, **kwargs):
+            kwargs.setdefault("net_arch", [256, 256])
+            kwargs.setdefault("activation_fn", nn.ReLU)
+            super().__init__(*args, **kwargs)
+
+except Exception:  # pragma: no cover
+    ServerPolicySB3 = None
