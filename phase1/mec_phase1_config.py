@@ -41,5 +41,5 @@ class Phase1Config:
     kappa: float = 1e-27
 
     # reward = w_qos * sum_qos - w_energy * total_energy
-    w_qos: float = 1.0
-    w_energy: float = 1e-6
+    w_qos: float = 0.5
+    w_energy: float = 1e-3

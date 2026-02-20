@@ -26,6 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timesteps-per-iter", type=int, default=2000)
     parser.add_argument("--out-dir", type=str, default="plots/phase1")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--device", type=str, default="cuda", choices=["auto", "cpu", "cuda"])
     return parser.parse_args()
 
 
@@ -141,6 +142,7 @@ def run_for_n(
     timesteps_per_iter: int,
     out_dir: str,
     base_seed: int,
+    device: str,
 ) -> None:
     target_dir = os.path.join(out_dir, f"N_{n_ue}")
     ensure_dir(target_dir)
@@ -185,6 +187,7 @@ def run_for_n(
         max_grad_norm=0.5,
         policy_kwargs={"activation_fn": nn.ReLU, "net_arch": [256, 256]},
         seed=base_seed,
+        device=device,
         verbose=0,
     )
 
@@ -202,6 +205,7 @@ def run_for_n(
         max_grad_norm=0.5,
         policy_kwargs={"activation_fn": nn.ReLU, "net_arch": [256, 256]},
         seed=base_seed + 999,
+        device=device,
         verbose=0,
     )
 
@@ -268,6 +272,10 @@ def main() -> None:
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
 
+    device = args.device
+    if device == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+
     for n_ue in args.n_values:
         run_for_n(
             n_ue=n_ue,
@@ -276,6 +284,7 @@ def main() -> None:
             timesteps_per_iter=args.timesteps_per_iter,
             out_dir=args.out_dir,
             base_seed=args.seed + n_ue,
+            device=device,
         )
 
 
