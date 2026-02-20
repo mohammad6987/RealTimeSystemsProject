@@ -6,6 +6,7 @@ from dataclasses import asdict
 from typing import Any, Dict, List
 
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 import numpy as np
 import ray
 from ray.tune.registry import register_env
@@ -29,6 +30,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--max-steps", type=int, default=200)
     p.add_argument("--n-users", type=int, default=100)
     p.add_argument("--out-dir", type=str, default="plots/phase2")
+    p.add_argument("--schedule-every", type=int, default=10)
     return p.parse_args()
 
 
@@ -167,19 +169,17 @@ def plot_per_cluster(curves: List[List[float]], title: str, y_label: str, out_pa
 
 
 def plot_schedule_view(schedule_logs: List[Dict[str, Any]], out_path: str) -> None:
-    """Show a compact Gantt view for offloaded tasks in first non-empty slots."""
-    panels: List[Dict[str, Any]] = []
-    for s in schedule_logs:
-        slot = int(s["slot"])
-        for c in s["clusters"]:
-            if c["order"]:
-                panels.append({"slot": slot, "cluster": c["cluster"], "order": c["order"], "start": c["start"], "finish": c["finish"]})
-            if len(panels) >= 9:
-                break
-        if len(panels) >= 9:
-            break
-
-    if not panels:
+    """Render a Gantt-like schedule view across all slots and clusters."""
+    if not schedule_logs:
+        plt.figure(figsize=(8, 3))
+        plt.axis("off")
+        plt.text(0.5, 0.5, "No offloaded tasks in evaluation schedule.", ha="center", va="center")
+        plt.tight_layout()
+        plt.savefig(out_path, dpi=150)
+        plt.close()
+        return
+    has_tasks = any(c["order"] for s in schedule_logs for c in s["clusters"])
+    if not has_tasks:
         plt.figure(figsize=(8, 3))
         plt.axis("off")
         plt.text(0.5, 0.5, "No offloaded tasks in evaluation schedule.", ha="center", va="center")
@@ -188,25 +188,48 @@ def plot_schedule_view(schedule_logs: List[Dict[str, Any]], out_path: str) -> No
         plt.close()
         return
 
-    cols = 3
-    rows = int(np.ceil(len(panels) / cols))
-    fig, axes = plt.subplots(rows, cols, figsize=(13, 3.5 * rows), squeeze=False)
+    max_cluster = -1
+    for s in schedule_logs:
+        for c in s["clusters"]:
+            max_cluster = max(max_cluster, int(c["cluster"]))
+    k = max_cluster + 1
+    if k <= 0:
+        plt.figure(figsize=(8, 3))
+        plt.axis("off")
+        plt.text(0.5, 0.5, "No cluster schedules found.", ha="center", va="center")
+        plt.tight_layout()
+        plt.savefig(out_path, dpi=150)
+        plt.close()
+        return
 
-    for idx, p in enumerate(panels):
-        ax = axes[idx // cols][idx % cols]
-        for rank, u in enumerate(p["order"]):
-            st = p["start"][int(u)]
-            ft = p["finish"][int(u)]
-            ax.barh(y=rank, width=ft - st, left=st, height=0.7)
-        ax.set_title(f"slot={p['slot']} cluster={p['cluster']}")
-        ax.set_xlabel("time (s)")
-        ax.set_ylabel("scheduled order")
-        ax.grid(axis="x", alpha=0.2)
+    total_slots = len(schedule_logs)
+    total_rows = max(1, total_slots * k)
+    fig_height = min(120.0, max(6.0, 0.08 * total_rows))
+    fig, ax = plt.subplots(figsize=(13, fig_height))
 
-    for idx in range(len(panels), rows * cols):
-        axes[idx // cols][idx % cols].axis("off")
+    cmap = plt.get_cmap("tab10", k)
+    for s in schedule_logs:
+        slot = int(s["slot"])
+        for c in s["clusters"]:
+            cluster = int(c["cluster"])
+            color = cmap(cluster % cmap.N)
+            for u in c["order"]:
+                st = c["start"][int(u)]
+                ft = c["finish"][int(u)]
+                y = slot * k + cluster
+                ax.barh(y=y, width=ft - st, left=st, height=0.8, color=color)
 
-    fig.suptitle("Phase-2 Edge Scheduling View", fontsize=12)
+    ax.set_title("Phase-2 Edge Scheduling View (All Slots)")
+    ax.set_xlabel("time (s)")
+    ax.set_ylabel("slot / cluster")
+    slot_ticks = [s * k + (k - 1) / 2.0 for s in range(total_slots)]
+    ax.set_yticks(slot_ticks)
+    ax.set_yticklabels([f"slot {s}" for s in range(total_slots)], fontsize=7)
+    ax.grid(axis="x", alpha=0.2)
+
+    handles = [mpatches.Patch(color=cmap(i), label=f"cluster {i}") for i in range(k)]
+    ax.legend(handles=handles, ncol=min(k, 5), fontsize=8, loc="upper right")
+
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
@@ -252,6 +275,12 @@ def run_for_k(k: int, args: argparse.Namespace) -> None:
             cluster_energy_curves[c].append(stats["cluster_energy_episode"][c])
 
         final_schedule = stats["schedule"]
+
+        if args.schedule_every > 0 and (it % args.schedule_every == 0):
+            plot_schedule_view(
+                final_schedule,
+                out_path=os.path.join(out_dir, f"edge_schedule_view_iter_{it}.png"),
+            )
 
         score = stats["sum_qos_episode"] - 1e-3 * stats["sum_energy_episode"]
         if score > best_score:

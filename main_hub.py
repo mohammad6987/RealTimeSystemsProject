@@ -40,6 +40,7 @@ def main() -> None:
     p2.add_argument("--out-dir", type=str, default="plots/phase2")
     p2.add_argument("--backend", choices=["rllib", "sb3", "sb3-multi"], default="rllib")
     p2.add_argument("--seed", type=int, default=42)
+    p2.add_argument("--schedule-every", type=int, default=10)
 
     args = parser.parse_args()
 
@@ -82,7 +83,11 @@ def main() -> None:
             "--out-dir",
             args.out_dir,
         ]
+        if args.schedule_every is not None:
+            cmd += ["--schedule-every", str(args.schedule_every)]
         if args.backend == "sb3":
+            cmd += ["--seed", str(args.seed)]
+        if args.backend == "sb3-multi":
             cmd += ["--seed", str(args.seed)]
 
     code = run_command(cmd)

@@ -140,13 +140,11 @@ def plot_per_ue_curves(values_per_ue: List[List[float]], title: str, y_label: st
 
 def plot_schedule(scheduling_logs: List[Dict[str, Any]], n_ue: int, path: str) -> None:
     """
-    Render a compact schedule view (Gantt-like) from evaluation logs.
+    Render a Gantt-like schedule view across all slots.
 
-    Each panel corresponds to one slot; bars show per-UE execution windows
-    for tasks that were actually offloaded.
+    Rows are (slot, UE) pairs; bars show offloaded task execution windows.
     """
-    selected = [s for s in scheduling_logs if s["order"]][:9]
-    if not selected:
+    if not scheduling_logs:
         # Keep a non-empty artifact even when no offloading occurs.
         plt.figure(figsize=(8, 3))
         plt.axis("off")
@@ -163,27 +161,27 @@ def plot_schedule(scheduling_logs: List[Dict[str, Any]], n_ue: int, path: str) -
         plt.close()
         return
 
-    cols = 3
-    rows = int(np.ceil(len(selected) / cols))
-    fig, axes = plt.subplots(rows, cols, figsize=(12, 3.2 * rows), squeeze=False)
+    total_slots = len(scheduling_logs)
+    total_rows = max(1, total_slots * n_ue)
+    fig_height = min(120.0, max(6.0, 0.08 * total_rows))
+    fig, ax = plt.subplots(figsize=(12, fig_height))
 
-    for idx, slot_data in enumerate(selected):
-        ax = axes[idx // cols][idx % cols]
+    for slot_data in scheduling_logs:
+        slot = int(slot_data["slot"])
         for ue in slot_data["order"]:
-            start = slot_data["start"][int(ue)]
-            finish = slot_data["finish"][int(ue)]
-            ax.barh(y=int(ue), width=finish - start, left=start, height=0.7)
-        ax.set_title(f"Slot {slot_data['slot']}")
-        ax.set_xlabel("Time (s)")
-        ax.set_ylabel("UE")
-        ax.set_yticks(range(n_ue))
-        ax.grid(axis="x", alpha=0.2)
+            ue_idx = int(ue)
+            start = slot_data["start"][ue_idx]
+            finish = slot_data["finish"][ue_idx]
+            y = slot * n_ue + ue_idx
+            ax.barh(y=y, width=finish - start, left=start, height=0.8)
 
-    # Hide unused subplot panels when < 9 slots were selected.
-    for idx in range(len(selected), rows * cols):
-        axes[idx // cols][idx % cols].axis("off")
-
-    fig.suptitle("Edge Server Learned Scheduling View", fontsize=12)
+    ax.set_title("Edge Server Learned Scheduling View (All Slots)")
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Slot / UE")
+    slot_ticks = [s * n_ue for s in range(total_slots)]
+    ax.set_yticks(slot_ticks)
+    ax.set_yticklabels([f"slot {s}" for s in range(total_slots)], fontsize=7)
+    ax.grid(axis="x", alpha=0.2)
     fig.tight_layout()
     fig.savefig(path, dpi=150)
     plt.close(fig)
