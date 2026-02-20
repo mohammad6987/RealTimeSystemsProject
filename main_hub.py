@@ -38,7 +38,7 @@ def main() -> None:
     p2.add_argument("--max-steps", type=int, default=200)
     p2.add_argument("--n-users", type=int, default=100)
     p2.add_argument("--out-dir", type=str, default="plots/phase2")
-    p2.add_argument("--backend", choices=["rllib", "sb3"], default="rllib")
+    p2.add_argument("--backend", choices=["rllib", "sb3", "sb3-multi"], default="rllib")
     p2.add_argument("--seed", type=int, default=42)
 
     args = parser.parse_args()
@@ -61,11 +61,12 @@ def main() -> None:
         if args.backend == "sb3":
             cmd += ["--seed", str(args.seed)]
     else:
-        module = (
-            "phase2.train_phase2_hierarchical_mappo"
-            if args.backend == "rllib"
-            else "phase2.train_phase2_hierarchical_mappo_sb3"
-        )
+        if args.backend == "rllib":
+            module = "phase2.train_phase2_hierarchical_mappo"
+        elif args.backend == "sb3-multi":
+            module = "phase2.train_phase2_hierarchical_mappo_sb3_multi"
+        else:
+            module = "phase2.train_phase2_hierarchical_mappo_sb3"
         cmd = [
             sys.executable,
             "-m",

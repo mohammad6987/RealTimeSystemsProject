@@ -15,6 +15,7 @@ class SB3Phase2JointEnv(gym.Env):
     The SB3 agent outputs a joint action for coordinator, all UEs, and cluster schedulers.
     Observations are concatenated in fixed order:
     [coordinator, ue_0..ue_{N-1}, cluster_sched_0..cluster_sched_{K-1}].
+    Cluster scheduler action layout: [priority_logits(m), forward_logits(m)] per cluster.
     """
 
     metadata = {"render_modes": []}

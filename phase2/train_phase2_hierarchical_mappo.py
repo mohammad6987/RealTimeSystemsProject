@@ -71,7 +71,7 @@ def build_algo(env_cfg: Dict[str, Any]):
             policy_mapping_fn=lambda aid, *args, **kwargs: (
                 "coordinator_policy"
                 if aid == "coordinator"
-                else ("ue_policy" if aid.startswith("ue_") else "cluster_sched_policy")
+                else ("ue_policy" if aid == "ue" else "cluster_sched_policy")
             ),
         )
     )
@@ -89,7 +89,7 @@ def evaluate_episode(algo, env_cfg: Dict[str, Any], eval_seed: int) -> Dict[str,
         for aid, agent_obs in obs.items():
             if aid == "coordinator":
                 policy_id = "coordinator_policy"
-            elif aid.startswith("ue_"):
+            elif aid == "ue":
                 policy_id = "ue_policy"
             else:
                 policy_id = "cluster_sched_policy"
@@ -224,6 +224,7 @@ def run_for_k(k: int, args: argparse.Namespace) -> None:
             max_steps=args.max_steps,
             seed=100 + k,
             max_users_per_cluster=int(np.ceil(args.n_users / k)),
+            aggregate_agents=True,
         )
     )
 

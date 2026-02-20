@@ -11,12 +11,13 @@ class Phase2Config:
     Hierarchy:
     - One coordinator agent allocates server CPU shares to clusters.
     - One UE agent per user decides offloading and bandwidth request.
-    - One cluster scheduler per cluster handles intra-cluster priority order.
+    - One cluster scheduler per cluster handles intra-cluster priority + forwarding.
     """
 
     # Fixed by project statement for phase 2.
     n_users: int = 100
     n_clusters: int = 4
+    aggregate_agents: bool = False
 
     # Episode/training controls.
     max_steps: int = 200
@@ -50,6 +51,9 @@ class Phase2Config:
 
     # Spectrum safety floor to prevent near-zero-rate starvation.
     theta_min: float = 0.01
+
+    # Coordinator safety floor to prevent cluster starvation.
+    phi_min: float = 0.05
 
     # Fixed upper bound for users per cluster action/obs padding.
     # For K in [4..10], max is ceil(100/4)=25.

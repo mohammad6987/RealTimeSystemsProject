@@ -68,10 +68,10 @@ class MECPhase2HierarchicalEnv(MultiAgentEnv):
     Agents:
     - coordinator: global server resource allocator across clusters.
     - ue_i: each UE decides offload + bandwidth request (same idea as phase 1).
-    - cluster_sched_j: one scheduler/coordinator per cluster, decides priority order.
+    - cluster_sched_j: one scheduler per cluster, decides priority order and forwarding.
 
     Hierarchy:
-    - UE requests -> cluster scheduler order -> execution under coordinator CPU shares.
+    - UE requests -> cluster scheduler forward + order -> execution under coordinator CPU shares.
     """
 
     def __init__(self, env_config: Dict[str, Any] | None = None):
@@ -83,14 +83,20 @@ class MECPhase2HierarchicalEnv(MultiAgentEnv):
         self.k = self.cfg.n_clusters
         self.max_steps = self.cfg.max_steps
         self.m = self.cfg.max_users_per_cluster
+        self.aggregate_agents = bool(self.cfg.aggregate_agents)
 
         self.rng = np.random.RandomState(self.cfg.seed)
 
         self.coordinator_id = "coordinator"
+        self.ue_agent_id = "ue"
+        self.cluster_agent_id = "cluster"
         self.ue_ids = [f"ue_{i}" for i in range(self.n_users)]
         self.cluster_sched_ids = [f"cluster_sched_{i}" for i in range(self.k)]
 
-        self.agent_ids = [self.coordinator_id] + self.ue_ids + self.cluster_sched_ids
+        if self.aggregate_agents:
+            self.agent_ids = [self.coordinator_id, self.ue_agent_id, self.cluster_agent_id]
+        else:
+            self.agent_ids = [self.coordinator_id] + self.ue_ids + self.cluster_sched_ids
         self.possible_agents = list(self.agent_ids)
         self.agents = list(self.agent_ids)
         self._agent_ids = set(self.agent_ids)
@@ -98,26 +104,45 @@ class MECPhase2HierarchicalEnv(MultiAgentEnv):
         # UE interface: same decision semantics as phase 1.
         self.ue_obs_space = spaces.Box(low=-np.inf, high=np.inf, shape=(5,), dtype=np.float32)
         self.ue_action_space = spaces.Box(low=-10.0, high=10.0, shape=(2,), dtype=np.float32)
+        self.ue_joint_obs_space = spaces.Box(
+            low=-np.inf, high=np.inf, shape=(self.n_users * 5,), dtype=np.float32
+        )
+        self.ue_joint_action_space = spaces.Box(
+            low=-10.0, high=10.0, shape=(self.n_users * 2,), dtype=np.float32
+        )
 
         # Global coordinator interface.
         self.coordinator_obs_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.k * 5,), dtype=np.float32)
         self.coordinator_action_space = spaces.Box(low=-10.0, high=10.0, shape=(self.k,), dtype=np.float32)
 
-        # Cluster scheduler gets request-rich cluster table and outputs priorities.
+        # Cluster scheduler gets request-rich cluster table and outputs priorities + forward decisions.
         # Per-row: [valid, data_norm, cycles_norm, deadline_norm, dist_norm, req_off, req_bw_logit]
         self.cluster_sched_obs_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.m * 7,), dtype=np.float32)
-        self.cluster_sched_action_space = spaces.Box(low=-10.0, high=10.0, shape=(self.m,), dtype=np.float32)
+        # Action layout per cluster: [priority_logits(m), forward_logits(m)].
+        self.cluster_sched_action_space = spaces.Box(low=-10.0, high=10.0, shape=(self.m * 2,), dtype=np.float32)
+        self.cluster_joint_obs_space = spaces.Box(
+            low=-np.inf, high=np.inf, shape=(self.k * self.m * 7,), dtype=np.float32
+        )
+        self.cluster_joint_action_space = spaces.Box(
+            low=-10.0, high=10.0, shape=(self.k * self.m * 2,), dtype=np.float32
+        )
 
         self.observation_spaces = {self.coordinator_id: self.coordinator_obs_space}
         self.action_spaces = {self.coordinator_id: self.coordinator_action_space}
 
-        for uid in self.ue_ids:
-            self.observation_spaces[uid] = self.ue_obs_space
-            self.action_spaces[uid] = self.ue_action_space
+        if self.aggregate_agents:
+            self.observation_spaces[self.ue_agent_id] = self.ue_joint_obs_space
+            self.action_spaces[self.ue_agent_id] = self.ue_joint_action_space
+            self.observation_spaces[self.cluster_agent_id] = self.cluster_joint_obs_space
+            self.action_spaces[self.cluster_agent_id] = self.cluster_joint_action_space
+        else:
+            for uid in self.ue_ids:
+                self.observation_spaces[uid] = self.ue_obs_space
+                self.action_spaces[uid] = self.ue_action_space
 
-        for sid in self.cluster_sched_ids:
-            self.observation_spaces[sid] = self.cluster_sched_obs_space
-            self.action_spaces[sid] = self.cluster_sched_action_space
+            for sid in self.cluster_sched_ids:
+                self.observation_spaces[sid] = self.cluster_sched_obs_space
+                self.action_spaces[sid] = self.cluster_sched_action_space
 
         # UE static + dynamic state.
         self.dist = np.zeros(self.n_users, dtype=np.float32)
@@ -229,10 +254,16 @@ class MECPhase2HierarchicalEnv(MultiAgentEnv):
 
     def _obs_dict(self) -> Dict[str, np.ndarray]:
         obs = {self.coordinator_id: self._coordinator_obs()}
-        for u, uid in enumerate(self.ue_ids):
-            obs[uid] = self._ue_obs(u)
-        for c, sid in enumerate(self.cluster_sched_ids):
-            obs[sid] = self._cluster_sched_obs(c)
+        if self.aggregate_agents:
+            ue_obs = np.concatenate([self._ue_obs(u) for u in range(self.n_users)], axis=0)
+            cluster_obs = np.concatenate([self._cluster_sched_obs(c) for c in range(self.k)], axis=0)
+            obs[self.ue_agent_id] = ue_obs.astype(np.float32)
+            obs[self.cluster_agent_id] = cluster_obs.astype(np.float32)
+        else:
+            for u, uid in enumerate(self.ue_ids):
+                obs[uid] = self._ue_obs(u)
+            for c, sid in enumerate(self.cluster_sched_ids):
+                obs[sid] = self._cluster_sched_obs(c)
         return obs
 
     def reset(self, *, seed=None, options=None):
@@ -264,10 +295,21 @@ class MECPhase2HierarchicalEnv(MultiAgentEnv):
         # 1) UE decisions (offload + bw request logits).
         offload = np.zeros(self.n_users, dtype=np.int32)
         bw_logits = np.zeros(self.n_users, dtype=np.float32)
-        for u, uid in enumerate(self.ue_ids):
-            a = np.asarray(action_dict[uid], dtype=np.float32)
-            offload[u] = 1 if a[0] > 0.0 else 0
-            bw_logits[u] = a[1]
+        if self.aggregate_agents:
+            a_joint = np.asarray(action_dict[self.ue_agent_id], dtype=np.float32).reshape(-1)
+            expected = self.n_users * 2
+            if a_joint.size != expected:
+                raise ValueError(f"Expected UE joint action size {expected}, got {a_joint.size}")
+            for u in range(self.n_users):
+                a0 = a_joint[2 * u]
+                a1 = a_joint[2 * u + 1]
+                offload[u] = 1 if a0 > 0.0 else 0
+                bw_logits[u] = a1
+        else:
+            for u, uid in enumerate(self.ue_ids):
+                a = np.asarray(action_dict[uid], dtype=np.float32)
+                offload[u] = 1 if a[0] > 0.0 else 0
+                bw_logits[u] = a[1]
 
         self.req_off = offload.astype(np.float32)
         self.req_bw_logit = bw_logits.copy()
@@ -278,21 +320,43 @@ class MECPhase2HierarchicalEnv(MultiAgentEnv):
 
         # 2) Global coordinator allocates cluster compute shares.
         coord_logits = np.asarray(action_dict[self.coordinator_id], dtype=np.float32)
-        phi = stable_softmax(coord_logits)
-        phi = np.maximum(phi, 1e-3)
-        phi = phi / (np.sum(phi) + 1e-12)
+        phi = floor_softmax(coord_logits, self.cfg.phi_min)
 
-        # 3) Cluster scheduler priorities (one scheduler per cluster).
+        # 3) Cluster scheduler priorities + forward decisions (one scheduler per cluster).
         priority_logits = np.full(self.n_users, -1e9, dtype=np.float32)
-        for c, sid in enumerate(self.cluster_sched_ids):
-            pr = np.asarray(action_dict[sid], dtype=np.float32)
-            users = self.cluster_users[c]
-            n_local = min(users.size, self.m)
-            if n_local > 0:
-                priority_logits[users[:n_local]] = pr[:n_local]
+        forward_accept = np.zeros(self.n_users, dtype=np.int32)
+        if self.aggregate_agents:
+            pr_joint = np.asarray(action_dict[self.cluster_agent_id], dtype=np.float32).reshape(-1)
+            expected = self.k * self.m * 2
+            if pr_joint.size != expected:
+                raise ValueError(f"Expected cluster joint action size {expected}, got {pr_joint.size}")
+            for c in range(self.k):
+                start = c * self.m * 2
+                pr = pr_joint[start : start + self.m * 2]
+                users = self.cluster_users[c]
+                n_local = min(users.size, self.m)
+                if n_local > 0:
+                    priority_logits[users[:n_local]] = pr[:n_local]
+                    forward_logits = pr[self.m : self.m + n_local]
+                    for idx, u in enumerate(users[:n_local]):
+                        uu = int(u)
+                        if offload[uu] == 1 and forward_logits[idx] > 0.0:
+                            forward_accept[uu] = 1
+        else:
+            for c, sid in enumerate(self.cluster_sched_ids):
+                pr = np.asarray(action_dict[sid], dtype=np.float32).reshape(-1)
+                users = self.cluster_users[c]
+                n_local = min(users.size, self.m)
+                if n_local > 0:
+                    priority_logits[users[:n_local]] = pr[:n_local]
+                    forward_logits = pr[self.m : self.m + n_local]
+                    for idx, u in enumerate(users[:n_local]):
+                        uu = int(u)
+                        if offload[uu] == 1 and forward_logits[idx] > 0.0:
+                            forward_accept[uu] = 1
 
-        # 4) Global spectrum allocation for all offloaded UEs.
-        off_idx = np.where(offload == 1)[0]
+        # 4) Global spectrum allocation for accepted offloaded UEs only.
+        off_idx = np.where((offload == 1) & (forward_accept == 1))[0]
         theta = np.zeros(self.n_users, dtype=np.float32)
         if off_idx.size > 0:
             theta_off = floor_softmax(bw_logits[off_idx], self.cfg.theta_min)
@@ -310,7 +374,7 @@ class MECPhase2HierarchicalEnv(MultiAgentEnv):
         local_time = np.zeros(self.n_users, dtype=np.float32)
         local_energy = np.zeros(self.n_users, dtype=np.float32)
         for u in range(self.n_users):
-            if offload[u] == 0:
+            if forward_accept[u] == 0:
                 local_time[u] = self.cycles[u] / self.f_loc[u]
                 local_energy[u] = self.cfg.kappa * self.cycles[u] * (self.f_loc[u] ** 2)
 
@@ -329,7 +393,7 @@ class MECPhase2HierarchicalEnv(MultiAgentEnv):
                 continue
 
             f_cluster = max(float(phi[c] * self.cfg.f_mec), 1e6)
-            off_c = [int(u) for u in users if offload[int(u)] == 1]
+            off_c = [int(u) for u in users if forward_accept[int(u)] == 1]
 
             starts: Dict[int, float] = {}
             finishes: Dict[int, float] = {}
@@ -351,7 +415,7 @@ class MECPhase2HierarchicalEnv(MultiAgentEnv):
 
             for u in users:
                 uu = int(u)
-                if offload[uu] == 0:
+                if forward_accept[uu] == 0:
                     completion[uu] = local_time[uu]
 
             slot_sched.append({"cluster": c, "order": order, "start": starts, "finish": finishes})
