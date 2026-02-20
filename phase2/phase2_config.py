@@ -46,8 +46,8 @@ class Phase2Config:
     kappa: float = 1e-27
 
     # Reward weights.
-    w_qos: float = 1.0
-    w_energy: float = 1e-7
+    w_qos: float = 2.0
+    w_energy: float = 5e-2
 
     # Spectrum safety floor to prevent near-zero-rate starvation.
     theta_min: float = 0.01
